@@ -1,4 +1,4 @@
-# Crypto Currency (aka "Bitcoin currency" Converter
+# Crypto Currency (aka "Bitcoin currency") Converter
 This program converts the value of various crypto currencies into its value in US dollars. The crypto currency converter program is divided into 4 parts:  
 1. we show the basic algorithm that converts the amount of US dollars as given by the user as input, into the number of bitcoins. 
 1. we generalize our bitcoin currency converter model by providing realtime bitcoin exchange rates. This is done by linking our API on the front-end to the back-end database server of coindesk.com - a leading news site that specializes in bitcoin and digital currencies. 
@@ -38,7 +38,7 @@ print(f'You can purchase {dollars/price} bitcoin')
 *You can purchase 0.48564171967160724 bitcoin*
 
 ### Part 3: Change bitcoin price format from string to decimal.
->We import the Decimal module from the decimal library in python. We recommend the use of decimal format for banking transactions since they tend to be more precise.
+>We import the Decimal module from the decimal library in python. We recommend the use of decimal format for financial transactions since they tend to be more precise.
 
 ```python
 import requests
