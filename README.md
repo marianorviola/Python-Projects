@@ -1,1 +1,1 @@
-# Python-Projects repository serves as a portfolio of various Python projects that I have worked on. As more projects are completed, they will be added to this repository. 
+# Python-Projects repository serves as a portfolio of various Python projects that I have worked on. As more projects are completed, they will be added to this repository. The latest python project completed is a Data Science project which was the capstone project from a data science team that I led during my post-grad certificate program at the Indian Institute of Technology Roorkee.
