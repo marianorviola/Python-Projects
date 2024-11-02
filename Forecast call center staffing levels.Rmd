@@ -1,0 +1,919 @@
+------------------------------------------------------------------------
+
+## Using the Erlang C Algorithm to Forecast Call Center Staffing Levels with R
+
+**Author:** Mariano Viola, Manager - SCS & SMB Business Planning, Charter Communications, Inc.\
+**Date:** October 8, 2024
+
+Why use the Erlang C Algorithm? - it is the industry standard - it is easy to implement - it is accurate
+
+#### Outline of the Report
+
+A. What is the Erlang C Algorithm?
+
+B. Load and Examine the data
+
+C. Data Cleaning and Feature Engineering
+
+D. Exploratory Data Analysis & Business Insights
+
+```         
+- 1. Univariate Analysis / Business Insights
+
+- 2. Bivariate Analysis / Business Insights
+```
+
+E. Building the Erlang C Algorithm
+
+F. Running the Call Center Forecasting Model
+
+G. The Erlang C Forecast App
+
+#### A. What is the Erlang C Algorithm?
+
+The Erlang C algorithm is the industry standard used by call centers and help desks to calculate the number of agents needed at a specified time period given the number of incoming calls and the targeted service level that the call center wants to achieve. The Erlang C formula was developed by Danish mathematician A.K. Erlang 100 years ago in 1917.
+
+The term PW is the probability that an incoming call will wait, given the traffic intensity (A) and the number of agents (N) that are currently available.
+
+![Image](https://www.callcentrehelper.com/images/stories/2017/12/erlang1.png)
+
+**A** - Traffic Intensity - Traffic intensity is the total time taken by all calls
+
+-   If the number of calls is 200 and average handling time is 3 minutes, then the total time taken is 600 call minutes;
+-   to convert into hours, divide by 60 produces 10 call hours or **erlangs.**
+
+**N** - Number of agents
+
+-   There is currently 10 erlangs traffic intensity;
+-   We assign N as A+1, which is 11. Therefore, the number of agents (N) equals 11.
+
+**SL** - Targeted Service Level
+
+-   The industry standard for service level (SL) is that 80% of calls should be answered within 20 seconds.
+
+![Image](https://www.callcentrehelper.com/images/stories/2017/12/service-level-erlang-equation-510.png)
+
+-   The service level equation uses the probability of wait **(PW)** calculated from the previous formula to obtain the level of service. It also uses **A** (traffic intensity), **N** (number of agents), target time and average handling time. Target time is 20 seconds.
+
+#### B. Load and Examine the data
+
+Install "readxl" library in R to load the excel file data set
+
+```{r}
+data<- read_xlsx(file.choose())
+```
+
+Get the dimension of the data set
+
+```{r}
+dim(data)
+```
+
+View the first 6 rows of data
+
+```{r}
+head(data)
+```
+
+Examine the structure of the data set
+
+```{r}
+str(data)
+```
+
+Get the statistical summary of each variable
+
+```{r}
+summary(data)
+```
+
+Get the "summary tools" library
+
+```{r}
+library("summarytools")
+```
+
+Print the summary table
+
+```{r}
+dfSummary(data)
+```
+
+Check for missing values
+
+```{r}
+colSums(is.na(data))
+```
+
+#### C. Data Cleaning and Feature Engineering
+
+**Data Cleaning #1:** clean the 4,288 missing values in customer satisfaction
+
+-   insert "0s" on missing value rows (4,288 rows or 13.6% of total) in customer satisfaction column
+
+-   each of the missing value row had an outcome = "HANG"; customers who hang up receive a "0" customer satisfaction score.
+
+```{r}
+data$customer_satisfaction <- ifelse(data$outcome=="HANG",0,data$customer_satisfaction)
+```
+
+check customer_satisfaction for missing values
+
+```{r}
+summary(data$customer_satisfaction)
+```
+
+check for outliers in customer_satisfaction
+
+```{r}
+boxplot(data$customer_satisfaction)
+```
+
+check for outliers in age
+
+```{r}
+boxplot(data$age)
+```
+
+**Feature Engineering #1:** create new feature "handling_time"
+
+handling_time = how long (in seconds) was the call serviced by the agent
+
+```{r}
+data$handling_time <- data$service_exit - data$service_start
+```
+
+check the structure of handling_time
+
+```{r}
+dfSummary(data$handling_time)
+```
+
+-   handling_time has 1,243 negative values due to the day change which starts at 00:00:01
+
+-   we fix the data discrepancy by adding 86,400 seconds (24*60*60 = 86,400 seconds); this will adjust the handling_time to the correct day time value
+
+**Data Cleaning #2:** add 86,400 seconds to each negative row of handling_time
+
+```{r}
+data$handling_time <- ifelse(data$handling_time < 0, data$handling_time + 86400, data$handling_time)
+```
+
+check the structure of handling_time
+
+```{r}
+summary(data$handling_time)
+```
+
+-   summary shows min value in handling_time is 0.0; this means all negative values have been transformed.
+
+```{r}
+dfSummary(data$handling_time)
+```
+
+**Feature Engineering #2:** create new variable: years_at_company
+
+```{r}
+data$years_at_company <- 2018 - data$year_of_joining
+```
+
+check the new variable
+
+```{r}
+summary(data$years_at_company)
+```
+
+**Feature Engineering #3:** create new variable: waiting_time
+
+```{r}
+data$waiting_time <- data$service_start - data$server_entry
+```
+
+**Data Cleaning #3:** fix discrepancy #1: if outcome = "ANSWERED" when handling_time = "0", then outcome must be changed to outcome = "HANG"
+
+```{r}
+data$outcome <- ifelse(data$handling_time == 0, "HANG", "ANSWERED")
+```
+
+**Data Cleaning #4:** fix discrepancy #2: if customer_satisfaction is blank when outcome = "HANG", then customer_satisfaction must be changed to customer_satisfaction = "0"
+
+```{r}
+data$customer_satisfaction <- ifelse(data$outcome == "HANG", 0, data$customer_satisfaction)
+```
+
+**Data Cleaning #5:** fix discrepancy #3: if outcome = "HANG", then waiting_time should = server_exit - server_entry
+
+```{r}
+data$waiting_time <- ifelse(data$outcome == "HANG", data$server_exit - data$server_entry, data$waiting_time)
+```
+
+check to make sure each of the data discrepancies have been corrected:
+
+```{r}
+summary(data$waiting_time)
+```
+
+```{r}
+summary(data$outcome)
+```
+
+```{r}
+dfSummary(data$outcome)
+```
+
+```{r}
+summary(data$customer_satisfaction)
+```
+
+```{r}
+dfSummary(data$customer_satisfaction)
+```
+
+**Data Cleaning #6:** waiting_time has negative values due to the day change; fix the problem by adding 86,400 seconds to the negative values of waiting_time
+
+```{r}
+data$waiting_time <- ifelse(data$waiting_time < 0, data$waiting_time + 86400, data$waiting_time)
+```
+
+check summary of waiting_time
+
+```{r}
+summary(data$waiting_time)
+```
+
+-   data discrepancy fixed - waiting_time has no more negative values
+
+**Feature Engineering #4:** dimension reduction - drop 3 unnecessary variables: "service_exit", "service_start" and "year_of_joining".
+
+```{r}
+data[ ,c('service_exit','service_start','year_of_joining')] <- list(NULL)
+```
+
+check data dimensions
+
+```{r}
+dim(data)
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+dfSummary(data$handling_time)
+```
+
+-   handling_time discrepancy fixed - no negative values
+
+check for negative values for years_at_company
+
+```{r}
+dfSummary(data$years_at_company)
+```
+
+-   data checked - no negative values
+
+```{r}
+summary(data$years_at_company)
+```
+
+#### D. Exploratory Data Analysis & Business Insights
+
+#### 1. Univariate Analysis & Insights
+
+Insight #1: Shift 2 is the biggest shift (58.8%) followed by Shift 3 (37.6%)
+
+```{r}
+pie(table(data$shift))
+```
+
+```{r}
+prop.table(table(data$shift))*100
+round(prop.table(table(data$shift))*100, digits=1)
+```
+
+Insight #2: Incoming calls are answered around 86% of the time while customers hang up 14% of the time.
+
+```{r}
+pie(table(data$outcome))
+```
+
+```{r}
+round(prop.table(table(data$outcome))*100, digits=1)
+```
+
+Insight #3: Roughly 77% of sales agents are male, 23% are female.
+
+```{r}
+pie(table(data$gender))
+```
+
+```{r}
+round(prop.table(table(data$gender))*100, digits=1)
+```
+
+Insight #4: 58% of incoming calls are rated "priority 0" while 28% are assigned a "priority 2" rating.
+
+```{r}
+pie(table(data$priority))
+```
+
+```{r}
+round(prop.table(table(data$priority))*100, digits = 1)
+```
+
+Insight #5: Around 71% of cases are resolved in the first call while roughly 29% of cases need a follow up call.
+
+```{r}
+pie(table(data$ftr))
+```
+
+```{r}
+round(prop.table(table(data$ftr))*100, digits = 1)
+```
+
+Insight #6: Most agents are between the age of 25 to 35 years.
+
+```{r}
+hist(data$age)
+```
+
+Insight #7: Customer satisfaction scores are either below 20 on the low end or between 65-100 on the high end.
+
+```{r}
+hist(data$customer_satisfaction)
+```
+
+Insight #8: Company tenure is heavily weighted towards 1-4 years
+
+```{r}
+hist(data$years_at_company)
+```
+
+Insight #9: On average, agents receive around 2,100 calls per month.
+
+```{r}
+table(data$agent_id)
+```
+
+#### 2. Bivariate Analysis & Business Insights
+
+Generate a list of the average (mean) customer satisfaction by agent id
+
+```{r}
+x<- aggregate(x= data$customer_satisfaction, by= list(data$agent_id), FUN = mean)
+x
+```
+
+Generate a list of the average (mean) handling time (seconds) by agent id
+
+```{r}
+x<- aggregate(x= data$handling_time, by= list(data$agent_id), FUN = mean)
+x
+```
+
+Use the dplyr library in R
+
+Count the number of incoming calls that went unanswered by each agent
+
+```{r}
+x<- data %>%
+  select(agent_id, outcome) %>%
+  filter(outcome == "HANG")
+x
+```
+
+Print the number of hang up calls per agent id
+
+```{r}
+table(x$agent_id)
+```
+
+Insight #10: Agents 1-5 had the highest number of customer hang up calls.
+
+Calculate how long it takes for an agent to answer a call (mean = average)
+
+```{r}
+dd11<- subset(data,outcome == 'ANSWERED')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$agent_id), FUN=mean)
+x
+```
+
+Insight #11: it takes on average, around 40 seconds for an agent to answer a call.
+
+Calculate the average (mean) time the customer waited before hanging up by agent id
+
+```{r}
+dd11<- subset(data,outcome == 'HANG')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$agent_id), FUN=mean)
+x
+```
+
+Insight #12: On average, customers only like to wait around 15 to 20 seconds before hanging up.
+
+Count the number of "ftr" events by agent id
+
+```{r}
+table(data$agent_id, data$ftr)
+```
+
+Insight #13: More experienced agents have higher positive FTRs. Agents 1-4 have higher negative FTRs compared to Agents 10-15 who have higher positive FTRs.
+
+We now use the agent's "age" to compare against other variables.
+
+Generate a list of the average (mean) customer satisfaction by the agent's age.
+
+```{r}
+x<- aggregate(x= data$customer_satisfaction, by= list(data$age), FUN = mean)
+x
+```
+
+Insight #14: The data shows that agents with more experience are better at handling customers. As the agent's age increases, customer satisfaction also increases.
+
+Generate a list of the average (mean) handling time by the agent's age
+
+```{r}
+x<- aggregate(x= data$handling_time, by= list(data$age), FUN = mean)
+x
+```
+
+Insight #15: as the agent's age increases, average handling time also increases.
+
+Use the dplyr library in R
+
+Count the number of incoming calls that went unanswered by agent's age
+
+```{r}
+x<- data %>%
+  select(age, outcome) %>%
+  filter(outcome == "HANG")
+x
+```
+
+Print the number of unanswered calls by age
+
+```{r}
+table(x$age)
+```
+
+Insight #16: On average, as the agent's age increases, the number of dropped calls decreases.
+
+Calculate the average (mean) time to answer the call by age
+
+```{r}
+dd11<- subset(data,outcome == 'ANSWERED')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$age), FUN=mean)
+x
+```
+
+Insight #17: There seems to be no relation between the agent's age and the average time to answer the call.
+
+Calculate the average (mean) time the customer waited before hanging up by age
+
+```{r}
+dd11<- subset(data,outcome == 'HANG')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$age), FUN=mean)
+x
+```
+
+Insight #18: No relation exists between the agent's age and the average time the customer waited before hanging up
+
+Count the number of "ftr" events by agent's age
+
+```{r}
+table(data$age, data$ftr)
+```
+
+Insight #19: As agent's age increases, so does the number of positive "FTRs"; newer agents (age: 21-25) could benefit from additional training or mentorship programs as they seem to have a higher number of unresolved FTRs.
+
+We now use the agent's tenure (or "years at company") to compare against other variables.
+
+Generate a list of the average (mean) customer satisfaction by agent's tenure
+
+```{r}
+x<- aggregate(x= data$customer_satisfaction, by= list(data$years_at_company), FUN = mean)
+x
+```
+
+Insight #20: The data shows that agents who've been with the company longer, seem to be better at handling customers. As the agent's tenure increases, so does their customer satisfaction scores.
+
+Generate a list of the average (mean) handling time by tenure or years at company
+
+```{r}
+x<- aggregate(x= data$handling_time, by= list(data$years_at_company), FUN = mean)
+x
+```
+
+Insight #21: No relation exists between the agent's tenure and average handling time.
+
+Use the dplyr library in R
+
+Count the number of unanswered calls by tenure
+
+```{r}
+x<- data %>%
+  select(years_at_company, outcome) %>%
+  filter(outcome == "HANG")
+x
+```
+
+Print the number of unanswered calls by agent's tenure
+
+```{r}
+table(x$years_at_company)
+```
+
+Insight #22: As agent tenure increases, the number of dropped calls decreases; more experienced agents tend to drop fewer calls than relatively newer agents.
+
+Calculate the average (mean) time to answer the call by tenure.
+
+```{r}
+dd11<- subset(data,outcome == 'ANSWERED')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$years_at_company), FUN=mean)
+x
+```
+
+Insight #23: No relation exists between average time to answer the call and agent's tenure.
+
+Calculate the average (mean) time the customer waited before hanging up by the agent's tenure
+
+```{r}
+dd11<- subset(data,outcome == 'HANG')
+x<- aggregate(x=dd11$waiting_time, by= list(dd11$years_at_company), FUN=mean)
+x
+```
+
+Insight #24: Except for the agent with a tenure of 10 years, there doesn't seem to be a relation between the average wait time before hanging up and agent's tenure.
+
+Count the number of "ftr" events by the agent's tenure
+
+```{r}
+table(data$years_at_company, data$ftr)
+```
+
+Insight #25: After three years at the company, the number of FTRs substantially improves; the likelihood of customers having their issues resolved in the first call greatly improves with an agent who has 4 years plus tenure.
+
+#### E. Build and Test the Erlang C Algorithm
+
+1.  Data Preparation
+
+Show column names
+
+```{r}
+names(data)
+```
+
+Install tidyr package in R for datetime transform
+
+```{r}
+library(tidyr)
+```
+
+**Feature Engineering #5:** Transform "server_entry" by separating the date from the time stamp
+
+```{r}
+head(data$server_entry,5)
+```
+
+Transform server_entry into two columns: "date1" and "server_entry" time stamp
+
+```{r}
+newDat<- separate(data,server_entry, into = c("date1","server_entry"), sep= " ")
+newDat
+```
+
+**Feature Engineering #6:** transform server_exit into two columns: "date2" and "server_exit" time stamp
+
+```{r}
+newDat<- separate(newDat,server_exit, into = c("date2","server_exit"), sep= " ")
+newDat
+```
+
+Drop variables date1 and date2
+
+```{r}
+newDat[ ,c('date1','date2')] <- list(NULL)
+newDat
+```
+
+Review the column names in the data set
+
+```{r}
+names(newDat)
+```
+
+Examine the structure of the date feature
+
+```{r}
+str(data$date)
+```
+
+Transform "date" feature from a POSIXct to a dateformat data type
+
+```{r}
+newDat$date<- as.Date(newDat$date)
+str(newDat$date)
+```
+
+Get a count of all incoming calls by date between 10/15/18 to 11/14/18
+
+```{r}
+table(newDat$date)
+```
+
+Get the mean of daily incoming calls for the time period 10/15/18 to 11/14/18
+
+```{r}
+mean(table(newDat$date))
+```
+
+Insight #26: On average, the call center gets about 1,088 calls per day
+
+2.  Create a training data set for the Erlang C algorithm
+
+-   First, choose a date from the call center data set, where the average daily call volume closely matches the average daily call volume of the call center data set.
+
+-   We chose 2018-11-08 as the training date since the daily call volume of 1,098 closely matches the average daily call volume of 1,088 of our data set.
+
+-   Second, we create a training data set "ddd" with 1,098 observations and 16 features from the 11/08/18 data subset.
+
+```{r}
+ddd<- newDat[newDat$date=="2018-11-08",]
+ddd
+```
+
+Another way to slice the data is to use the subset method in R.
+
+```{r}
+ddf<- subset(newDat,date=="2018-11-08")
+ddf
+```
+
+3.  Test the train data set
+
+```{=html}
+<!-- -->
+```
+a.  ***Test #1:*** Count all incoming calls for one hour (12:00 a.m. to 1:00 a.m.)
+
+Install "chron" library in R to help objects handle dates and times
+
+```{r}
+library(chron)
+```
+
+Establish a 24 hour period for the 11/08/18 training data set: declare a start time variable "z" and an end time variable "z1" in hours, minutes and seconds
+
+```{r}
+z <- times("00:00:00")
+z1 <- times("23:59:59")
+```
+
+Count the number of calls that come in from 12:00 a.m. to 1:00 a.m. by iterating the number of rows by 1 for that time period.
+
+```{r}
+nrow(ddd[ddd$server_entry >=z & ddd$server_entry <z +(1/24), ])
+```
+
+-   There was a total of 9 calls between 12a.m. to 1a.m. on 11/08/18.
+
+b.  ***Test #2:*** Count all incoming calls for one day - 11/08/18.
+
+Build a loop that counts all incoming calls for a 24-hr. period
+
+```{r}
+v11<-vector("numeric")
+x=1
+while(z<=z1)
+{
+  v11[x]<-nrow(ddd[ddd$server_entry >=z & ddd$server_entry <z +(1/24), ])
+  z=z+(1/24)
+  x=x+1
+}
+v11
+```
+
+-   There were no incoming calls between 2a.m. to 5a.m. on 11/08/18
+
+4.  Build the Erlang C Algorithm (i.e., the "PW" Equation)
+
+![Image](https://www.callcentrehelper.com/images/stories/2017/12/erlang1.png)
+
+***Step 1:*** Declare the numerator as "a" and define its variables
+
+a.  rate = number of calls coming in
+
+rate = 200
+
+b.  duration = average handling time (180 seconds = 3 minutes)
+
+duration = 180
+
+c.  target = how many seconds the call needs to be answered by.
+
+target = 20
+
+d.  gos_target (grade of service target) = the percent of calls to be answered within the targeted time.
+
+-   **Note:** the industry standard is 80% of calls should be answered within 20 seconds.
+
+gos_target = 80
+
+e.  interval = the time interval of AHT (average handling time) in hours, i.e., 60 minutes
+
+interval = 60
+
+f.  intensity "int" is in erlangs or call hours.
+
+int = 10 erlangs (or 10 call hours).
+
+g.  number of agents = traffic intensity (in erlangs) + 1
+
+-   **Note:** we round agents to a whole number; with traffic intensity of 10 erlangs, we would require 11 agents to meet the service level target.
+
+agents = 11
+
+h.  Get the value of the numerator "a"
+
+```{r}
+rate <- 200
+duration <- 180
+target <- 20
+gos_target <- 80
+interval <- 60
+int <- (rate * (duration/interval))/60
+agents <- round(int) + 1
+
+a<- ((int^agents) * agents)/(factorial(agents) * (agents - int))
+a
+```
+
+***Step 2:*** Declare the denominator as "b" and define its variables
+
+Construct a loop for the summation sign in the denominator
+
+```{r}
+b=1
+for(i in 1:agents-1)
+{ 
+  b<- b+((int^(1))/factorial(1))
+}
+b
+```
+
+***Step 3:*** Obtain the value of "PW" (the probability that the incoming call will wait.)
+
+```{r}
+pw<- a/(a+b)
+pw
+```
+
+-   The probability that the caller will wait is 99.6%.
+
+#### F. Run the Call Center Forecasting Model using the Erlang C Algorithm
+
+**Objective:** The goal of the model is to determine the number of call center agents that are needed in order to meet the minimum service level benchmarks established by the Company.
+
+1.  Execute the Erlang C algorithm
+
+```{r}
+int <- (rate * (duration/interval))/60
+agents <- round(int) + 1
+a<- ((int^agents) * agents)/(factorial(agents) * (agents - int))
+b=1
+for(i in 1:agents-1)
+{ 
+  b<- b+((int^(1))/factorial(1))
+}
+pw<- a/(a+b)
+pw
+```
+
+-   The probability of a call wait is 0.995 or 99.5%
+
+2.  Execute the Service Level (SL) Formula
+
+![Image](https://www.callcentrehelper.com/images/stories/2017/12/service-level-erlang-equation-510.png)
+
+Define the formula for service level "SL":
+
+```{r}
+SL<- 1- (pw*exp(-(agents-int)*(target/duration)))
+SL
+```
+  - If the number of agents deployed is 1, then the service level is 10.9%. This is well below the target service level of 80%. 
+
+We can increment the number of agents by 1, one step at a time, until we reach the desired Service Level.
+
+3.  Increment the number of agents by 1 until the target Service Level (SL) is reached:
+```{r}
+int <- (rate * (duration/interval))/60
+agents<- round(int)
+
+agents<- agents + 9
+
+a<- ((int^agents) * agents)/(factorial(agents) * (agents - int))
+b=1
+for(i in 1:agents-1)
+{ 
+  b<- b+((int^(1))/factorial(1))
+}
+pw<- a/(a+b)
+
+SL<- 1- (pw*exp(-(agents-int)*(target/duration)))
+SL
+```
+  - The model above shows that by increasing the number of agents to 9 sales agents, we can increase the service level to 82.5%.
+
+4. Create a loop to calculate how many agents are needed to meet the service level goal of 80%.
+```{r}
+rate<- 200
+duration<- 180
+target<- 20
+gos_target<- 80
+interval<- 60
+
+int<- (rate * (duration/interval))/60
+agents<- round(int)+1
+
+while(TRUE)
+{
+  a<- ((int^agents)*agents)/(factorial(agents)*(agents-int))
+  
+  b=1
+  for(i in 1:agents-1)
+  { 
+    b<-b+((int^(i))/factorial(i))
+  }
+  pw<-a/(a+b)
+  
+  SL<- 1-(pw*exp(-(agents-int)*(target/duration)))
+  if(SL>= (gos_target/100))
+  {
+    break()
+  }
+  agents<- agents+1
+}
+
+agents
+SL
+```
+  - Given the above assumptions, the model shows a staffing level of 14 agents is needed to achieve a SL = 88.8%
+
+5. Create a RESOURCE FUNCTION that links the Erlang C algorithm to the data table
+```{r}
+rate<- 200
+duration<- 180
+target<- 20
+gos_target<- 80
+interval<- 60
+
+resource<- function(rate,duration,target,gos_target,interval=60)
+{
+  int<- (rate * (duration/interval))/60
+  agents<- round(int)+1
+  
+  while(TRUE)
+  {
+    a<- ((int^agents)*agents)/(factorial(agents)*(agents-int))
+    b=1
+    for(i in 1:agents-1)
+    { 
+      b<-b+((int^(i))/factorial(i))
+    }
+    pw<-a/(a+b)
+    
+    SL<- 1-(pw*exp(-(agents-int)*(target/duration)))
+    if(SL>= (gos_target/100))
+    {
+      return(c(agents,SL))
+    }
+    agents<- agents+1
+  }
+}
+
+resource(200,180,20,80,60)
+```
+
+6. Link the RESOURCE FUNCTION to data table.
+```{r}
+
+x=1
+y<- vector("numeric")
+while(x<=24)
+{
+  print(resource(v11[x],mean(data$handling_time),20,80,60))
+  x=x+1
+}
+
+y
+```
+
+  - The model output above shows the hourly staffing level (shown in column 1) that was needed at the call center for the 24-hour period (from 12:00 a.m. to 23:59:59) in order to meet the target service level (shown in column 2) for the period of 11/08/18.
+
+  - Because there were no incoming calls between 2:00 a.m. to 5:00 a.m., a staffing level of 1 sales agent was sufficient to achieve a target sales level of 100%. 
+
+
+#### G. The Erlang C Forecast App
+
+Insert the Instructions for the Erlang C Forecast App here.
